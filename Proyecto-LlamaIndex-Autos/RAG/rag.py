@@ -117,7 +117,7 @@ def verificar_configuracion() -> None:
 # --------------------------------------------------------------------------- #
 def get_qdrant_client() -> qdrant_client.QdrantClient:
     """
-    Cliente conectado al servidor Qdrant del usuario.
+    Cliente (síncrono) conectado al servidor Qdrant del usuario.
 
     `port=None` es importante: por defecto qdrant-client añade el puerto 6333
     cuando la URL no lo trae, y eso rompe los servidores detrás de un proxy
@@ -132,18 +132,41 @@ def get_qdrant_client() -> qdrant_client.QdrantClient:
     )
 
 
+def get_async_qdrant_client() -> qdrant_client.AsyncQdrantClient:
+    """
+    Cliente asíncrono al mismo servidor Qdrant.
+
+    Lo necesita QdrantVectorStore para resolver `aquery`/`aget_nodes`: sin él
+    lanza "Async client is not initialized!" en cuanto algo lo llama desde un
+    contexto async (el agente de Telegram corre con `agent.run()` en un event
+    loop, así que siempre pasa por ahí).
+    """
+    return qdrant_client.AsyncQdrantClient(
+        url=QDRANT_URL.rstrip("/"),
+        api_key=QDRANT_API_KEY or None,
+        port=None,
+        timeout=60,
+    )
+
+
 def get_vector_store(
     client: qdrant_client.QdrantClient | None = None,
+    aclient: qdrant_client.AsyncQdrantClient | None = None,
     collection_name: str = COLLECTION_NAME,
 ) -> QdrantVectorStore:
     """
     Vector store de LlamaIndex apuntando a la colección del tenant.
+
+    Se le pasan ambos clientes (sync y async): la ingesta y las validaciones
+    usan el sync, pero el agente consulta el índice de forma async, y
+    QdrantVectorStore no crea el cliente async solo si ya recibió el sync.
 
     Si la colección no existe, QdrantVectorStore la crea automáticamente en la
     primera escritura, con la dimensión que devuelva el modelo de embeddings.
     """
     return QdrantVectorStore(
         client=client or get_qdrant_client(),
+        aclient=aclient or get_async_qdrant_client(),
         collection_name=collection_name,
     )
 
